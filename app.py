@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Универсальная функция для ответа кнопками
+# Универсальная функция для ответа кнопками (теперь с 4-й кнопкой для синхронизации)
 def get_button_response(text_message):
     return jsonify({
         "result": "ok",
@@ -12,17 +12,18 @@ def get_button_response(text_message):
             "buttons": [
                 {"text": "Español"},
                 {"text": "Français"},
-                {"text": "Deutsch"}
+                {"text": "Deutsch"},
+                {"text": "Main Menu"}
             ]
         }]
     })
 
-# Обработка корня (чтобы не было 404)
+# Обработка корня
 @app.route('/', methods=['GET', 'POST'])
 def home():
     return get_button_response("Welcome! Please choose your language:")
 
-# Твой основной путь
+# Основной путь для Jivo
 @app.route('/webhooks/jivo', methods=['GET', 'POST'])
 def jivo_webhook():
     if request.method == 'GET':
@@ -30,22 +31,36 @@ def jivo_webhook():
         
     data = request.json or {}
     event = data.get('event_name')
-    text = data.get('message', {}).get('text', '')
+    
+    # Извлекаем текст сообщения
+    message = data.get('message', {})
+    text = message.get('text', '') if isinstance(message, dict) else ""
 
-    # Если нажат конкретный язык
+    # Если это событие проверки или пустое событие
+    if not event or not text:
+        return jsonify({"result": "ok"})
+
+    # Логика ответов
     if "Español" in text:
-        reply = "¡Hola! ¿Cómo puedo ayudarte?"
+        reply = "¡Hola! ¿Cómo puedo ayudarte con tu iPhone?"
     elif "Français" in text:
         reply = "Bonjour! Comment puis-je vous aider ?"
     elif "Deutsch" in text:
         reply = "Hallo! Wie kann ich Ihnen helfen?"
+    elif "Main Menu" in text:
+        return get_button_response("Main Menu opened. Please choose your language:")
     else:
-        # На любое другое сообщение — кидаем кнопки
+        # На любое другое сообщение (включая приветствие) — кидаем кнопки
         return get_button_response("Please choose your language:")
 
     return jsonify({
         "result": "ok",
-        "commands": [{"command": "send_message", "text": reply}]
+        "commands": [
+            {
+                "command": "send_message", 
+                "text": reply
+            }
+        ]
     })
 
 if __name__ == '__main__':
