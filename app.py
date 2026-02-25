@@ -1,40 +1,63 @@
 from flask import Flask, request, jsonify
 import os
+import time
 
-app = Flask(_name_)
+app = Flask(__name__)
 
-# Твой provider_id от Jivo (обязательно вставь свой!)
-PROVIDER_ID = "arb66O7Pbq"  # например: zhFZipzT:8560a55a9af37d68782b3234a84f344c592ab766
+# ВАЖНО: Замени на свой реальный ID из настроек Jivo (раздел Интеграция для разработчиков)
+# Если оставить этот, запросы от Jivo не дойдут до функции
+PROVIDER_ID = "arb66O7Pbq" 
 
-# Простая память (для теста; в продакшене используй Redis/DB)
+# Простая память для хранения выбора языка
 user_languages = {}  # {client_id: 'es' / 'fr' / 'de'}
+
+@app.route("/", methods=["GET"])
+def index():
+    return "Бот работает! Ожидаю вебхуки от Jivo.", 200
 
 @app.route(f"/webhooks/{PROVIDER_ID}", methods=["POST"])
 def jivo_webhook():
     data = request.json
+    if not data:
+        return jsonify({"status": "error", "message": "No data"}), 400
+
     print("Получено от Jivo:", data)
 
     event = data.get("event")
     client_id = data.get("client_id")
     chat_id = data.get("chat_id")
+    # Используем текущее время, если Jivo не прислал timestamp
     timestamp = data.get("timestamp", int(time.time()))
 
     if event == "CLIENT_MESSAGE":
-        text = data.get("message", {}).get("text", "").strip().lower()
+        message_data = data.get("message", {})
+        text = message_data.get("text", "").strip()
+        
+        # 1. Проверяем, не нажал ли пользователь на кнопку выбора языка
+        if text == "lang_es" or text == "Español":
+            user_languages[client_id] = "es"
+            return send_text_reply(client_id, chat_id, "Idioma seleccionado: Español. ¿En qué puedo ayudarte?", timestamp)
+        
+        elif text == "lang_fr" or text == "Français":
+            user_languages[client_id] = "fr"
+            return send_text_reply(client_id, chat_id, "Langue sélectionnée : Français. Comment puis-je vous aider ?", timestamp)
+        
+        elif text == "lang_de" or text == "Deutsch":
+            user_languages[client_id] = "de"
+            return send_text_reply(client_id, chat_id, "Sprache ausgewählt: Deutsch. Wie kann ich Ihnen helfen?", timestamp)
 
-        # Если это первое сообщение (или нет языка) — отправляем кнопки выбора языка
+        # 2. Если язык еще не выбран — отправляем кнопки
         if client_id not in user_languages:
             reply = {
                 "client_id": client_id,
                 "chat_id": chat_id,
                 "message": {
                     "type": "BUTTONS",
-                    "text": "Please select your language / Por favor selecciona tu idioma / Veuillez sélectionner votre langue",  # fallback текст
+                    "text": "Please select your language / Пожалуйста, выберите язык:",
                     "title": "Language / Idioma / Langue",
-                    "force_reply": True,  # заставляет ответить кнопкой (опционально)
                     "buttons": [
                         {"id": "lang_es", "text": "Español"},
-                        {"id": "lang_fr", "text": "Français"},
+                        {"text": "Français"}, # Можно отправлять без ID, тогда в text придет название
                         {"id": "lang_de", "text": "Deutsch"}
                     ],
                     "timestamp": timestamp
@@ -42,47 +65,26 @@ def jivo_webhook():
             }
             return jsonify(reply), 200
 
-        # Если язык уже выбран — отвечаем на нужном языке
-        lang = user_languages.get(client_id, 'en')
-        reply_text = f"You wrote: {text} (language: {lang})"  # здесь потом подключишь перевод/ИИ
-
-        response = {
-            "client_id": client_id,
-            "chat_id": chat_id,
-            "message": {
-                "type": "TEXT",
-                "text": reply_text,
-                "timestamp": timestamp
-            }
-        }
-        return jsonify(response), 200
-
-    # Обработка клика по кнопке (Jivo пришлёт CLIENT_MESSAGE с text = id кнопки? Нет — пришлёт специальное событие)
-    # В документации Jivo: при клике по кнопке приходит CLIENT_MESSAGE с text = id кнопки или текст кнопки
-    if event == "CLIENT_MESSAGE" and "lang_" in text:
-        lang_code = text.split("_")[1]  # lang_es → es
-        user_languages[client_id] = lang_code
-        reply_text = f"Язык выбран: {lang_code.upper()}. Чем могу помочь?"
-        if lang_code == "es":
-            reply_text = "Idioma seleccionado: Español. ¿En qué puedo ayudarte?"
-        elif lang_code == "fr":
-            reply_text = "Langue sélectionnée : Français. Comment puis-je vous aider ?"
-        elif lang_code == "de":
-            reply_text = "Sprache ausgewählt: Deutsch. Wie kann ich Ihnen helfen?"
-
-        response = {
-            "client_id": client_id,
-            "chat_id": chat_id,
-            "message": {
-                "type": "TEXT",
-                "text": reply_text,
-                "timestamp": timestamp
-            }
-        }
-        return jsonify(response), 200
+        # 3. Если язык выбран — отвечаем в зависимости от контекста
+        lang = user_languages.get(client_id)
+        reply_text = f"Я получил ваше сообщение: '{text}'. (Выбранный язык: {lang})"
+        return send_text_reply(client_id, chat_id, reply_text, timestamp)
 
     return jsonify({"status": "ok"}), 200
 
-if _name_ == "_main_":
+def send_text_reply(client_id, chat_id, text, timestamp):
+    """Вспомогательная функция для отправки текстовых ответов"""
+    response = {
+        "client_id": client_id,
+        "chat_id": chat_id,
+        "message": {
+            "type": "TEXT",
+            "text": text,
+            "timestamp": timestamp
+        }
+    }
+    return jsonify(response), 200
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
