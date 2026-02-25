@@ -24,23 +24,28 @@ def get_menu_response(text_message):
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
-    return get_menu_response("Welcome! Choose your language / Выберите язык:")
+    return "Server is running on Starter plan!"
 
 @app.route('/webhooks/jivo', methods=['POST'])
 def jivo_webhook():
     data = request.json or {}
-    text = data.get('message', {}).get('text', '')
+    event = data.get('event_name')
+    text = data.get('message', {}).get('text', '') if data.get('message') else ""
 
-    # Логика выбора
+    # Если Jivo просто проверяет связь
+    if not event:
+        return jsonify({"result": "ok"})
+
+    # Если клиент выбрал язык
     if "Español" in text or text == "1":
-        reply = "¡Hola! ¿Cómo puedo ayudarte con tu iPhone?"
+        reply = "¡Hola! ¿Cómo puedo ayudarte?"
     elif "Français" in text or text == "2":
         reply = "Bonjour! Comment puis-je vous aider ?"
     elif "Deutsch" in text or text == "3":
         reply = "Hallo! Wie kann ich Ihnen helfen?"
     else:
-        # На любое другое сообщение — кидаем меню
-        return get_menu_response("Please choose / Выберите:")
+        # На любое другое сообщение — СБРАСЫВАЕМ оператора и шлем меню
+        return get_menu_response("Please choose your language:")
 
     return jsonify({
         "result": "ok",
