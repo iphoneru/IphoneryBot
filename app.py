@@ -8,11 +8,11 @@ def get_menu_response(text_message):
         "commands": [
             {
                 "command": "invite_agent",
-                "agent_id": "bot" # Сообщаем Jivo, что управляет бот
+                "agent_id": "bot"
             },
             {
                 "command": "send_message",
-                "text": text_message,
+                "text": f"{text_message}\n\n1. Español\n2. Français\n3. Deutsch",
                 "buttons": [
                     {"text": "Español"},
                     {"text": "Français"},
@@ -24,29 +24,23 @@ def get_menu_response(text_message):
 
 @app.route('/', methods=['GET', 'POST'])
 def home():
-    return get_menu_response("Welcome! Please choose your language:")
+    return get_menu_response("Welcome! Choose your language / Выберите язык:")
 
 @app.route('/webhooks/jivo', methods=['POST'])
 def jivo_webhook():
     data = request.json or {}
-    event = data.get('event_name')
-    message = data.get('message', {})
-    text = message.get('text', '') if isinstance(message, dict) else ""
+    text = data.get('message', {}).get('text', '')
 
-    # Игнорируем технические сообщения самого бота
-    if event == 'bot_message':
-        return jsonify({"result": "ok"})
-
-    # Логика ответов
-    if "Español" in text:
-        reply = "¡Hola! ¿Cómo puedo ayudarte?"
-    elif "Français" in text:
+    # Логика выбора
+    if "Español" in text or text == "1":
+        reply = "¡Hola! ¿Cómo puedo ayudarte con tu iPhone?"
+    elif "Français" in text or text == "2":
         reply = "Bonjour! Comment puis-je vous aider ?"
-    elif "Deutsch" in text:
+    elif "Deutsch" in text or text == "3":
         reply = "Hallo! Wie kann ich Ihnen helfen?"
     else:
-        # На любое другое сообщение или старт — принудительно шлем меню
-        return get_menu_response("Please choose your language / Выберите язык:")
+        # На любое другое сообщение — кидаем меню
+        return get_menu_response("Please choose / Выберите:")
 
     return jsonify({
         "result": "ok",
