@@ -31,20 +31,19 @@ def jivo_webhook():
 
     # 2. Обработка выбора (кликов по кнопкам)
     if event == 'client_message':
-        client_text = data.get('message', {}).get('text', '')
-        
-        if "Español" in client_text:
-            reply = "¡Hola! ¿Cómo puedo ayudarte con tu iPhone?"
-        elif "Français" in client_text:
-            reply = "Bonjour! Comment puis-je vous aider avec votre iPhone?"
-        elif "Deutsch" in client_text:
-            reply = "Hallo! Wie kann ich Ihnen mit Ihrem iPhone helfen?"
-        else:
-            reply = "I'm processing your request..."
-
         return jsonify({
             "result": "ok",
-            "commands": [{"command": "send_message", "text": reply}]
+            "commands": [
+                {
+                    "command": "send_message",
+                    "text": "Please choose your language:",
+                    "buttons": [
+                        {"text": "Español"},
+                        {"text": "Français"},
+                        {"text": "Deutsch"}
+                    ]
+                }
+            ]
         })
 
     return jsonify({"result": "ok"})
