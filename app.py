@@ -1,51 +1,30 @@
 from flask import Flask, request, jsonify
+import os
 
 app = Flask(__name__)
 
-def get_menu_response(text_message):
-    return jsonify({
-        "result": "ok",
-        "commands": [
-            {
-                "command": "invite_agent",
-                "agent_id": "bot"
-            },
-            {
-                "command": "send_message",
-                "text": f"{text_message}\n\n1. Español\n2. Français\n3. Deutsch",
-                "buttons": [
-                    {"text": "Español"},
-                    {"text": "Français"},
-                    {"text": "Deutsch"}
-                ]
-            }
-        ]
-    })
-
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/')
 def home():
-    return get_menu_response("Welcome! Choose your language / Выберите язык:")
+    return 'Chatbot is running!'
 
-@app.route('/webhooks/jivo', methods=['POST'])
-def jivo_webhook():
-    data = request.json or {}
-    text = data.get('message', {}).get('text', '')
-
-    # Логика выбора
-    if "Español" in text or text == "1":
-        reply = "¡Hola! ¿Cómo puedo ayudarte con tu iPhone?"
-    elif "Français" in text or text == "2":
-        reply = "Bonjour! Comment puis-je vous aider ?"
-    elif "Deutsch" in text or text == "3":
-        reply = "Hallo! Wie kann ich Ihnen helfen?"
+@app.route('/chat', methods=['POST'])
+def chat():
+    user_message = request.json.get('message', '')
+    
+    # Simple response logic (replace with your AI logic)
+    if 'hello' in user_message.lower():
+        bot_response = 'Hi there! How can I help you?'
+    elif 'help' in user_message.lower():
+        bot_response = 'I can answer questions and chat with you!'
     else:
-        # На любое другое сообщение — кидаем меню
-        return get_menu_response("Please choose / Выберите:")
+        bot_response = f'You said: {user_message}'
+    
+    return jsonify({'response': bot_response})
 
-    return jsonify({
-        "result": "ok",
-        "commands": [{"command": "send_message", "text": reply}]
-    })
+@app.route('/health')
+def health():
+    return {'status': 'healthy'}
 
 if __name__ == '__main__':
-    app.run(port=10000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
