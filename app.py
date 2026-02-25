@@ -7,46 +7,49 @@ def jivo_webhook():
     data = request.json
     event = data.get('event_name')
     
-    # 1. Срабатывает сразу при открытии чата
-    if event == 'chat_accepted':
-        return jsonify({
-            "result": "ok",
-            "commands": [
-                {
-                    "command": "set_agent_info",
-                    "name": "Iphonery Assistant",
-                    "title": "AI Bot"
-                },
-                {
-                    "command": "send_message",
-                    "text": "Please choose your language / Пожалуйста, выберите язык:",
-                    "buttons": [
-                        {"text": "Español"},
-                        {"text": "Français"},
-                        {"text": "Deutsch"}
-                    ]
-                }
-            ]
-        })
+    # Кнопки выбора языка
+    language_options = [
+        {"text": "Español"},
+        {"text": "Français"},
+        {"text": "Deutsch"}
+    ]
 
-    # 2. Обработка выбора (кликов по кнопкам)
+    # Если это новое сообщение от клиента
     if event == 'client_message':
-        return jsonify({
-            "result": "ok",
-            "commands": [
-                {
+        text = data.get('message', {}).get('text', '')
+        
+        # Если клиент уже выбрал язык — отвечаем
+        if "Español" in text:
+            reply = "¡Hola! ¿Cómo puedo ayudarte?"
+        elif "Français" in text:
+            reply = "Bonjour! Comment puis-je vous aider ?"
+        elif "Deutsch" in text:
+            reply = "Hallo! Wie kann ich Ihnen helfen?"
+        else:
+            # Если текст любой другой — снова предлагаем кнопки
+            return jsonify({
+                "result": "ok",
+                "commands": [{
                     "command": "send_message",
                     "text": "Please choose your language:",
-                    "buttons": [
-                        {"text": "Español"},
-                        {"text": "Français"},
-                        {"text": "Deutsch"}
-                    ]
-                }
-            ]
+                    "buttons": language_options
+                }]
+            })
+        
+        return jsonify({
+            "result": "ok",
+            "commands": [{"command": "send_message", "text": reply}]
         })
 
-    return jsonify({"result": "ok"})
+    # Для всех остальных событий (включая открытие чата) — шлем кнопки
+    return jsonify({
+        "result": "ok",
+        "commands": [{
+            "command": "send_message",
+            "text": "Welcome! Please choose your language:",
+            "buttons": language_options
+        }]
+    })
 
 if __name__ == '__main__':
     app.run(port=10000)
