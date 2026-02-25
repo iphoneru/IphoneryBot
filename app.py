@@ -50,8 +50,10 @@ def jivo_webhook():
     elif "Main Menu" in text:
         return get_button_response("Main Menu opened. Please choose your language:")
     else:
-        # На любое другое сообщение (включая приветствие) — кидаем кнопки
-        return get_button_response("Please choose your language:")
+        return jsonify({
+            "result": "ok",
+            "commands": [{"command": "send_message", "text": "Я тебя вижу! Напиши: Español"}]
+        })
 
     return jsonify({
         "result": "ok",
