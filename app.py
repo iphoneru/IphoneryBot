@@ -2,18 +2,28 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-@app.route('/webhooks/<provider_id>', methods=['POST'])
-def jivo_webhook(provider_id):
-    incoming_data = request.json
-    print(f"Получен запрос: {incoming_data}")
+@app.route('/webhooks/jivo', methods=['POST'])
+def jivo_webhook():
+    data = request.json
+    print(f"Получен запрос: {data}")
 
-    reply = {
-        "event": "message",
-        "message": {
-            "text": "Привет! Бот работает. Подключение успешно!"
+    # Проверяем, что это именно сообщение от клиента
+    if data.get('event_name') == 'client_message':
+        client_text = data.get('message', {}).get('text', '')
+        
+        # Формируем ответ для Jivo
+        response_data = {
+            "result": "ok",
+            "commands": [
+                {
+                    "command": "send_message",
+                    "text": f"Привет! Я получил твое сообщение: '{client_text}'. Чем могу помочь?"
+                }
+            ]
         }
-    }
-    return jsonify(reply), 200
+        return jsonify(response_data)
+
+    return jsonify({"result": "ok"})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(port=10000)
