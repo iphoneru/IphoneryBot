@@ -17,13 +17,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Iphonery Jivo Bot")
-
-openai_client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 JIVO_BOT_ENDPOINT = os.getenv(
     "JIVO_BOT_ENDPOINT",
     "https://bot.jivosite.com/webhooks/4xMrS387N2hl2fF/arb66O7Pbq"
 )
+
+MAIN_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
 chat_histories: dict[str, deque] = defaultdict(lambda: deque(maxlen=20))
 
@@ -42,14 +43,11 @@ TOOLS = [
             "name": "transfer_to_agent",
             "description": (
                 "Transfer the conversation to a human operator. "
-                "ONLY call this when: "
-                "1) Client explicitly asks for a human agent; "
-                "2) Question is about a specific order status/tracking; "
-                "3) Client is very upset or demanding escalation; "
-                "4) Technical defect complaint about received product; "
-                "5) B2B/bulk order inquiry; "
-                "6) After 2-3 attempts you still cannot answer the question. "
-                "For ALL other questions answer directly, do NOT call this function."
+                "Call this ONLY when the client explicitly asks to speak with a human, "
+                "operator, manager or agent. Example phrases: "
+                "'connect me to an operator', 'I want to talk to a person', "
+                "'speak with support', 'human please'. "
+                "Do NOT call this for any question — always try to answer first."
             ),
             "parameters": {
                 "type": "object",
@@ -59,14 +57,118 @@ TOOLS = [
                 "required": ["reason"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": (
+                "Search iphonery.com for information when the answer is not in your knowledge base. "
+                "Use for specific product specs, current prices, stock, or anything you are unsure about."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The question or topic to search for"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
     }
 ]
 
 
-async def send_to_jivo(payload: dict) -> None:
-    async with httpx.AsyncClient(timeout=10) as client:
+async def do_site_search(query: str) -> str:
+    """Search iphonery.com using the built-in web_search tool in Responses API."""
+    try:
+        response = await client.responses.create(
+            model=MAIN_MODEL,
+            tools=[{"type": "web_search"}],
+            input=f"Ищи инфу на сайте https://iphonery.com/ Вопрос: {query}",
+        )
+        return response.output_text or "No results found."
+    except Exception as e:
+        logger.error("Site search error: %s", e)
+        return "Search failed."
+
+
+async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, bool]:
+    history = chat_histories[chat_id]
+    history.append({"role": "user", "content": user_message})
+
+    for _ in range(3):
+        messages = list(history)
+
         try:
-            r = await client.post(
+            response = await client.responses.create(
+                model=MAIN_MODEL,
+                instructions=SYSTEM_PROMPT,
+                input=messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                max_output_tokens=1024,
+            )
+        except Exception as e:
+            logger.error("OpenAI error: %s", e)
+            return None, True
+
+        # Check output items for tool calls
+        tool_calls_found = False
+        for item in response.output:
+            if item.type == "function_call":
+                tool_calls_found = True
+                fn = item.name
+
+                if fn == "transfer_to_agent":
+                    try:
+                        reason = json.loads(item.arguments).get("reason", "n/a")
+                    except Exception:
+                        reason = "n/a"
+                    logger.info("INVITE_AGENT chat_id=%s reason=%s", chat_id, reason)
+                    history.append({"role": "assistant", "content": "[transferred to agent]"})
+                    return None, True
+
+                if fn == "search_web":
+                    try:
+                        query = json.loads(item.arguments).get("query", user_message)
+                    except Exception:
+                        query = user_message
+                    logger.info("SEARCH chat_id=%s query=%s", chat_id, query)
+                    search_result = await do_site_search(query)
+
+                    # Add assistant tool call + tool result to history for next iteration
+                    history.append({"role": "assistant", "content": f"[search: {query}]"})
+                    history.append({"role": "user", "content": f"Search result: {search_result}"})
+
+        if tool_calls_found:
+            continue
+
+        # Normal text reply
+        reply = (response.output_text or "").strip()
+        if not reply:
+            return None, True
+
+        history.append({"role": "assistant", "content": reply})
+        return reply, False
+
+    return None, True
+
+
+async def process_and_reply(chat_id: str, client_id: str, user_text: str) -> None:
+    reply_text, should_transfer = await get_ai_response(chat_id, user_text)
+    if should_transfer:
+        await jivo_invite_agent(chat_id, client_id)
+    else:
+        await jivo_send_message(chat_id, client_id, reply_text)
+
+
+async def send_to_jivo(payload: dict) -> None:
+    async with httpx.AsyncClient(timeout=10) as http:
+        try:
+            r = await http.post(
                 JIVO_BOT_ENDPOINT,
                 json=payload,
                 headers={"Content-Type": "application/json"}
@@ -99,54 +201,8 @@ async def jivo_invite_agent(chat_id: str, client_id: str) -> None:
         "chat_id": str(chat_id),
         "event": "INVITE_AGENT"
     }
-    logger.info("INVITE_AGENT chat_id=%s", chat_id)
+    logger.info("INVITE_AGENT sent chat_id=%s", chat_id)
     await send_to_jivo(payload)
-
-
-async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, bool]:
-    history = chat_histories[chat_id]
-    history.append({"role": "user", "content": user_message})
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}] + list(history)
-
-    try:
-        response = await openai_client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto",
-            max_completion_tokens=1024,
-        )
-    except Exception as e:
-        logger.error("OpenAI API error: %s", e)
-        return None, True
-
-    choice = response.choices[0]
-
-    if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
-        for tool_call in choice.message.tool_calls:
-            if tool_call.function.name == "transfer_to_agent":
-                try:
-                    reason = json.loads(tool_call.function.arguments).get("reason", "n/a")
-                except Exception:
-                    reason = "n/a"
-                logger.info("AI → INVITE_AGENT chat_id=%s reason: %s", chat_id, reason)
-                history.append({"role": "assistant", "content": "[transferred to agent]"})
-                return None, True
-
-    reply = (choice.message.content or "").strip()
-    if not reply:
-        return None, True
-
-    history.append({"role": "assistant", "content": reply})
-    return reply, False
-
-
-async def process_and_reply(chat_id: str, client_id: str, user_text: str) -> None:
-    reply_text, should_transfer = await get_ai_response(chat_id, user_text)
-    if should_transfer:
-        await jivo_invite_agent(chat_id, client_id)
-    else:
-        await jivo_send_message(chat_id, client_id, reply_text)
 
 
 @app.post("/4xMrS387N2hl2fF")
