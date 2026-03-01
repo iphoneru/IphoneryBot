@@ -155,7 +155,7 @@ async def process_and_reply(chat_id: str, client_id: str, user_text: str) -> Non
         await jivo_send_message(chat_id, client_id, reply_text)
 
 
-@app.post("/arb66O7Pbq")
+@app.post("/4xMrS387N2hl2fF")
 async def jivo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
         body = await request.json()
