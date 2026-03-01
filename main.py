@@ -17,13 +17,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Iphonery Jivo Bot")
-client = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
+oai = AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
 JIVO_BOT_ENDPOINT = os.getenv(
     "JIVO_BOT_ENDPOINT",
     "https://bot.jivosite.com/webhooks/4xMrS387N2hl2fF/arb66O7Pbq"
 )
-
 MAIN_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-mini")
 
 chat_histories: dict[str, deque] = defaultdict(lambda: deque(maxlen=20))
@@ -36,63 +35,47 @@ def load_prompt() -> str:
 
 SYSTEM_PROMPT = load_prompt()
 
+# Responses API: name/description/parameters на верхнем уровне (НЕ вложены в "function"!)
 TOOLS = [
     {
         "type": "function",
-        "function": {
-            "name": "transfer_to_agent",
-            "description": (
-                "Transfer the conversation to a human operator. "
-                "Call this ONLY when the client explicitly asks to speak with a human, "
-                "operator, manager or agent. Example phrases: "
-                "'connect me to an operator', 'I want to talk to a person', "
-                "'speak with support', 'human please'. "
-                "Do NOT call this for any question — always try to answer first."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {"type": "string"}
-                },
-                "required": ["reason"]
-            }
+        "name": "transfer_to_agent",
+        "description": (
+            "Transfer the conversation to a human operator. "
+            "Call this ONLY when the client explicitly asks to speak with a human, "
+            "operator, manager or agent. Example phrases: "
+            "'connect me to an operator', 'I want to talk to a person', "
+            "'speak with support', 'human please'. "
+            "Do NOT call this for any question — always try to answer first."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string"}
+            },
+            "required": ["reason"]
         }
     },
     {
         "type": "function",
-        "function": {
-            "name": "search_web",
-            "description": (
-                "Search iphonery.com for information when the answer is not in your knowledge base. "
-                "Use for specific product specs, current prices, stock, or anything you are unsure about."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "The question or topic to search for"
-                    }
-                },
-                "required": ["query"]
-            }
+        "name": "search_web",
+        "description": (
+            "Search iphonery.com for information when the answer is not in your knowledge base. "
+            "Use for specific product specs, current prices, stock, or anything you are unsure about."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The question or topic to search for"
+                }
+            },
+            "required": ["query"]
         }
-    }
+    },
+    {"type": "web_search"}
 ]
-
-
-async def do_site_search(query: str) -> str:
-    """Search iphonery.com using the built-in web_search tool in Responses API."""
-    try:
-        response = await client.responses.create(
-            model=MAIN_MODEL,
-            tools=[{"type": "web_search"}],
-            input=f"Ищи инфу на сайте https://iphonery.com/ Вопрос: {query}",
-        )
-        return response.output_text or "No results found."
-    except Exception as e:
-        logger.error("Site search error: %s", e)
-        return "Search failed."
 
 
 async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, bool]:
@@ -100,13 +83,13 @@ async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, 
     history.append({"role": "user", "content": user_message})
 
     for _ in range(3):
-        messages = list(history)
+        input_messages = list(history)
 
         try:
-            response = await client.responses.create(
+            response = await oai.responses.create(
                 model=MAIN_MODEL,
                 instructions=SYSTEM_PROMPT,
-                input=messages,
+                input=input_messages,
                 tools=TOOLS,
                 tool_choice="auto",
                 max_output_tokens=1024,
@@ -115,11 +98,11 @@ async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, 
             logger.error("OpenAI error: %s", e)
             return None, True
 
-        # Check output items for tool calls
-        tool_calls_found = False
+        has_tool_call = False
+
         for item in response.output:
             if item.type == "function_call":
-                tool_calls_found = True
+                has_tool_call = True
                 fn = item.name
 
                 if fn == "transfer_to_agent":
@@ -137,16 +120,30 @@ async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, 
                     except Exception:
                         query = user_message
                     logger.info("SEARCH chat_id=%s query=%s", chat_id, query)
-                    search_result = await do_site_search(query)
 
-                    # Add assistant tool call + tool result to history for next iteration
-                    history.append({"role": "assistant", "content": f"[search: {query}]"})
-                    history.append({"role": "user", "content": f"Search result: {search_result}"})
+                    try:
+                        search_resp = await oai.responses.create(
+                            model=MAIN_MODEL,
+                            tools=[{"type": "web_search"}],
+                            input=f"Ищи инфу на сайте https://iphonery.com/ Вопрос: {query}",
+                        )
+                        search_result = search_resp.output_text or "No results."
+                    except Exception as e:
+                        logger.error("Search error: %s", e)
+                        search_result = "Search failed."
 
-        if tool_calls_found:
+                    history.append({
+                        "role": "assistant",
+                        "content": f"[search result for: {query}]"
+                    })
+                    history.append({
+                        "role": "user",
+                        "content": f"Search result: {search_result}"
+                    })
+
+        if has_tool_call:
             continue
 
-        # Normal text reply
         reply = (response.output_text or "").strip()
         if not reply:
             return None, True
