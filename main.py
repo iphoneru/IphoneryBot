@@ -115,7 +115,6 @@ async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, 
             tools=TOOLS,
             tool_choice="auto",
             max_completion_tokens=1024,
-            temperature=0.4,
         )
     except Exception as e:
         logger.error("OpenAI API error: %s", e)
