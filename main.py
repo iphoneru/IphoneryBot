@@ -35,7 +35,6 @@ def load_prompt() -> str:
 
 SYSTEM_PROMPT = load_prompt()
 
-# Responses API: name/description/parameters на верхнем уровне (НЕ вложены в "function"!)
 TOOLS = [
     {
         "type": "function",
@@ -60,31 +59,42 @@ TOOLS = [
         "type": "function",
         "name": "search_web",
         "description": (
-            "Search iphonery.com for information when the answer is not in your knowledge base. "
-            "Use for specific product specs, current prices, stock, or anything you are unsure about."
+            "Search iphonery.com for current product info, prices or availability "
+            "when the answer is not in your knowledge base."
         ),
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The question or topic to search for"
-                }
+                "query": {"type": "string"}
             },
             "required": ["query"]
         }
-    },
-    {"type": "web_search"}
+    }
 ]
+
+
+async def do_site_search(query: str) -> str:
+    """Отдельный вызов с встроенным web_search прицельно по iphonery.com."""
+    try:
+        resp = await oai.responses.create(
+            model=MAIN_MODEL,
+            tools=[{"type": "web_search"}],
+            input=f"Search on site https://iphonery.com/ for: {query}. Return price and key info.",
+        )
+        return resp.output_text or "No results found."
+    except Exception as e:
+        logger.error("Site search error: %s", e)
+        return "Search failed."
 
 
 async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, bool]:
     history = chat_histories[chat_id]
     history.append({"role": "user", "content": user_message})
 
-    for _ in range(3):
-        input_messages = list(history)
+    # Строим input для Responses API из истории
+    input_messages = list(history)
 
+    for _ in range(3):
         try:
             response = await oai.responses.create(
                 model=MAIN_MODEL,
@@ -98,58 +108,49 @@ async def get_ai_response(chat_id: str, user_message: str) -> tuple[str | None, 
             logger.error("OpenAI error: %s", e)
             return None, True
 
-        has_tool_call = False
+        # Собираем function_call items из ответа
+        function_calls = [item for item in response.output if item.type == "function_call"]
 
-        for item in response.output:
-            if item.type == "function_call":
-                has_tool_call = True
-                fn = item.name
+        if not function_calls:
+            # Нет tool calls — берём текстовый ответ
+            reply = (response.output_text or "").strip()
+            if not reply:
+                return None, True
+            history.append({"role": "assistant", "content": reply})
+            return reply, False
 
-                if fn == "transfer_to_agent":
-                    try:
-                        reason = json.loads(item.arguments).get("reason", "n/a")
-                    except Exception:
-                        reason = "n/a"
-                    logger.info("INVITE_AGENT chat_id=%s reason=%s", chat_id, reason)
-                    history.append({"role": "assistant", "content": "[transferred to agent]"})
-                    return None, True
+        # Обрабатываем каждый function_call
+        # В Responses API нужно добавить весь output предыдущего ответа + function_call_output
+        input_messages = input_messages + list(response.output)
 
-                if fn == "search_web":
-                    try:
-                        query = json.loads(item.arguments).get("query", user_message)
-                    except Exception:
-                        query = user_message
-                    logger.info("SEARCH chat_id=%s query=%s", chat_id, query)
+        for item in function_calls:
+            fn = item.name
 
-                    try:
-                        search_resp = await oai.responses.create(
-                            model=MAIN_MODEL,
-                            tools=[{"type": "web_search"}],
-                            input=f"Ищи инфу на сайте https://iphonery.com/ Вопрос: {query}",
-                        )
-                        search_result = search_resp.output_text or "No results."
-                    except Exception as e:
-                        logger.error("Search error: %s", e)
-                        search_result = "Search failed."
+            if fn == "transfer_to_agent":
+                try:
+                    reason = json.loads(item.arguments).get("reason", "n/a")
+                except Exception:
+                    reason = "n/a"
+                logger.info("INVITE_AGENT chat_id=%s reason=%s", chat_id, reason)
+                history.append({"role": "assistant", "content": "[transferred to agent]"})
+                return None, True
 
-                    history.append({
-                        "role": "assistant",
-                        "content": f"[search result for: {query}]"
-                    })
-                    history.append({
-                        "role": "user",
-                        "content": f"Search result: {search_result}"
-                    })
+            if fn == "search_web":
+                try:
+                    query = json.loads(item.arguments).get("query", user_message)
+                except Exception:
+                    query = user_message
+                logger.info("SEARCH chat_id=%s query=%s", chat_id, query)
 
-        if has_tool_call:
-            continue
+                search_result = await do_site_search(query)
+                logger.info("SEARCH RESULT: %s", search_result[:200])
 
-        reply = (response.output_text or "").strip()
-        if not reply:
-            return None, True
-
-        history.append({"role": "assistant", "content": reply})
-        return reply, False
+                # Правильный формат ответа на function_call в Responses API
+                input_messages.append({
+                    "type": "function_call_output",
+                    "call_id": item.call_id,
+                    "output": search_result
+                })
 
     return None, True
 
