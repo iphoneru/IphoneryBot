@@ -78,7 +78,7 @@ For **iPhones** the main differences are:
 - Full details: https://iphonery.com/article/pago
 
 ## VAT Invoice
-- Invoices issued with VAT included under the REBU margin scheme (VAT included in price but not itemised separately for refurbished goods).
+- Invoices are issued with VAT included under the REBU margin scheme (VAT is included in the price but is not shown separately for all products).
 - Full details: https://iphonery.com/article/invoice-with-vat
 
 ## Warranty
