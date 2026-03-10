@@ -82,6 +82,10 @@ For **iPhones** the main differences are:
 ## VAT Invoice
 - Invoices are issued with VAT included under the REBU margin scheme (VAT is included in the price but is not shown separately for all products).
 - Full details: https://iphonery.com/article/invoice-with-vat
+- If you require a standard VAT invoice with VAT shown separately for a company purchase, payment is possible only by bank transfer.
+Please send us by email the device model (or product link) along with your full company details, and we will prepare a proforma invoice for you.
+
+Please note: the price for purchases with a standard VAT invoice may be higher.
 
 ## Warranty
 - **New products:** 3-year legal warranty (EU Directive 2019/771). Starts from online registration or invoice date.
