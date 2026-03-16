@@ -65,6 +65,8 @@ For **iPhones** the main differences are:
 3. **mmWave 5G** — only in USA (and partially Japan/Korea). EU/India have Sub-6 GHz 5G only.
 4. **Markings** — Indian versions have more regulatory text on back. EU and US are minimal.
 5. **All other features** (cameras, display, Apple Intelligence, etc.) are identical across all regions.
+6. **IN** — versions have a few more markings/text on the back cover of the phone compared to EU versions.
+The main advantage of IN (India) is the noticeably lower price for a brand-new device with exactly the same technical specifications as the EU model
 
 ## Shipping & Delivery
 - **Free shipping** throughout Europe. No shipping outside Europe.
